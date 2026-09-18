@@ -7,7 +7,9 @@ import { useRealtime } from "@/lib/realtime-client"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { format } from "date-fns"
 import { useParams, useRouter } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import Explosion from "@/components/explosion"
+import { playBoom, playTick } from "@/lib/sound"
 
 function formatTimeRemaining(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -38,6 +40,22 @@ const RoomPage = () => {
 
   const [copyStatus, setCopyStatus] = useState("COPY")
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
+  const [exploding, setExploding] = useState(false)
+  const blastedRef = useRef(false)
+
+  // Detonate once: play the boom and show the blast overlay. Navigation home
+  // happens when the animation finishes (Explosion's onDone).
+  const detonate = useCallback(() => {
+    if (blastedRef.current) return
+    blastedRef.current = true
+    playBoom()
+    setExploding(true)
+  }, [])
+
+  // Stable so the Explosion's finish-timer isn't reset on every re-render.
+  const goHome = useCallback(() => {
+    router.push("/?destroyed=true")
+  }, [router])
 
   // Join the room (assigns the auth-token cookie, enforces the 2-person cap).
   useEffect(() => {
@@ -75,11 +93,17 @@ const RoomPage = () => {
     setTimeRemaining(ttlData.ttl)
   }, [ttlData?.ttl])
 
+  // Ticking clock for the final 10 seconds (higher pitch in the last 3).
   useEffect(() => {
-    if (timeRemaining === null || timeRemaining < 0) return
+    if (timeRemaining === null || exploding) return
+    if (timeRemaining > 0 && timeRemaining <= 10) playTick(timeRemaining <= 3)
+  }, [timeRemaining, exploding])
+
+  useEffect(() => {
+    if (timeRemaining === null || timeRemaining < 0 || exploding) return
 
     if (timeRemaining === 0) {
-      router.push("/?destroyed=true")
+      detonate()
       return
     }
 
@@ -94,7 +118,7 @@ const RoomPage = () => {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [timeRemaining, router])
+  }, [timeRemaining, detonate, exploding])
 
   const { data: messages, refetch } = useQuery({
     queryKey: ["messages", roomId],
@@ -152,7 +176,7 @@ const RoomPage = () => {
     enabled: joined,
     onEvent: (event) => {
       if (event.event === "message") refetch()
-      if (event.event === "destroy") router.push("/?destroyed=true")
+      if (event.event === "destroy") detonate()
     },
   })
 
@@ -160,6 +184,7 @@ const RoomPage = () => {
     mutationFn: async () => {
       await client.room.delete(null, { query: { roomId } })
     },
+    onSuccess: () => detonate(),
   })
 
   const copyLink = () => {
@@ -168,8 +193,24 @@ const RoomPage = () => {
     setTimeout(() => setCopyStatus("COPY"), 2000)
   }
 
+  const shareRoom = async () => {
+    const url = window.location.href
+    const text = `Join my private, self-destructing chat: ${url}`
+    // Native share sheet (mobile) lists WhatsApp, Telegram, etc.
+    if (typeof navigator !== "undefined" && navigator.share) {
+      try {
+        await navigator.share({ title: "Private Chat", text, url })
+        return
+      } catch {
+        // user cancelled or share failed — fall through to WhatsApp web
+      }
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank")
+  }
+
   return (
     <main className="flex flex-col h-screen max-h-screen overflow-hidden">
+      {exploding && <Explosion onDone={goHome} />}
       <header className="border-b border-zinc-800 p-4 flex items-center justify-between bg-zinc-900/30">
         <div className="flex items-center gap-4">
           <div className="flex flex-col">
@@ -183,6 +224,12 @@ const RoomPage = () => {
                 className="text-[10px] bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
               >
                 {copyStatus}
+              </button>
+              <button
+                onClick={shareRoom}
+                className="text-[10px] bg-green-800/70 hover:bg-green-700 px-2 py-0.5 rounded text-green-100 transition-colors flex items-center gap-1"
+              >
+                🔗 SHARE
               </button>
             </div>
           </div>
