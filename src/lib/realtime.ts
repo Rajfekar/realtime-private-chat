@@ -31,6 +31,7 @@ export type Message = z.infer<typeof message>
 
 export type RealtimeEvent =
   | { event: "message"; data: Message }
+  | { event: "update" }
   | { event: "destroy"; data: { isDestroyed: true } }
 
 /** ioredis keyPrefix does NOT cover pub/sub channels, so prefix them ourselves. */

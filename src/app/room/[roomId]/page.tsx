@@ -213,8 +213,20 @@ const RoomPage = () => {
     roomId,
     enabled: joined,
     onEvent: (event) => {
-      if (event.event === "message") refetch()
+      if (event.event === "message" || event.event === "update") refetch()
       if (event.event === "destroy") detonate()
+    },
+  })
+
+  const { mutate: deleteMessage } = useMutation({
+    mutationFn: async (messageId: string) => {
+      await fetch(
+        `/api/messages?roomId=${encodeURIComponent(roomId)}&messageId=${encodeURIComponent(
+          messageId
+        )}`,
+        { method: "DELETE" }
+      )
+      refetch()
     },
   })
 
@@ -314,6 +326,19 @@ const RoomPage = () => {
                 <span className="text-[10px] text-zinc-600">
                   {format(msg.timestamp, "HH:mm")}
                 </span>
+
+                {/* `token` is only present on the caller's own messages. */}
+                {msg.token && (
+                  <button
+                    onClick={() => {
+                      if (confirm("Delete this message?")) deleteMessage(msg.id)
+                    }}
+                    title="Delete message"
+                    className="text-[10px] text-zinc-600 hover:text-red-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100"
+                  >
+                    ✕ delete
+                  </button>
+                )}
               </div>
 
               {msg.file ? (

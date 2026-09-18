@@ -135,6 +135,55 @@ const messages = new Elysia({ prefix: "/messages" })
       }),
     }
   )
+  .delete(
+    "/",
+    async ({ query, auth, set }) => {
+      const { roomId } = auth
+      const raw = await redis.lrange(keys.messages(roomId), 0, -1)
+
+      // Find the exact stored entry for this message id.
+      let storedStr: string | null = null
+      let msg: Message | null = null
+      for (const s of raw) {
+        try {
+          const m = JSON.parse(s) as Message
+          if (m.id === query.messageId) {
+            storedStr = s
+            msg = m
+            break
+          }
+        } catch {}
+      }
+
+      if (!storedStr || !msg) {
+        set.status = 404
+        return { error: "not-found" }
+      }
+      // Only the author can delete their own message.
+      if (msg.token !== auth.token) {
+        set.status = 403
+        return { error: "not-owner" }
+      }
+
+      await redis.lrem(keys.messages(roomId), 1, storedStr)
+
+      // If it was a file message, drop the stored file too.
+      if (msg.file?.fileId) {
+        const fid = msg.file.fileId
+        await Promise.all([
+          redis.del(keys.fileBlob(roomId, fid)),
+          redis.del(keys.fileMeta(roomId, fid)),
+          redis.srem(keys.files(roomId), fid),
+        ])
+      }
+
+      await publish(roomId, { event: "update" })
+      return { ok: true }
+    },
+    {
+      query: z.object({ roomId: z.string(), messageId: z.string() }),
+    }
+  )
   .get(
     "/",
     async ({ auth }) => {
