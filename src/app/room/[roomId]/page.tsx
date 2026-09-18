@@ -10,6 +10,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Explosion from "@/components/explosion"
 import { playBoom, playTick } from "@/lib/sound"
+import { toast } from "sonner"
 
 function formatTimeRemaining(seconds: number) {
   const mins = Math.floor(seconds / 60)
@@ -36,6 +37,7 @@ const RoomPage = () => {
   const [code, setCode] = useState("")
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -147,32 +149,64 @@ const RoomPage = () => {
     },
   })
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = (file: File) => {
     setUploadError(null)
     setUploading(true)
-    try {
-      const form = new FormData()
-      form.append("file", file)
-      const res = await fetch(
-        `/api/upload?roomId=${encodeURIComponent(roomId)}&sender=${encodeURIComponent(
-          username
-        )}`,
-        { method: "POST", body: form }
-      )
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        if (body.error === "file-too-large")
-          setUploadError(`File too large (max ${formatBytes(body.maxBytes)}).`)
-        else if (body.error === "unsupported-type")
-          setUploadError("Only images and PDF files are allowed.")
-        else setUploadError("Upload failed.")
-        return
-      }
-      refetch()
-    } finally {
+    setUploadPct(0)
+
+    const toastId = toast.loading(`Uploading ${file.name} — 0%`)
+    const form = new FormData()
+    form.append("file", file)
+
+    const finish = () => {
       setUploading(false)
+      setUploadPct(0)
       if (fileRef.current) fileRef.current.value = ""
     }
+
+    // XHR (not fetch) so we get real upload progress events.
+    const xhr = new XMLHttpRequest()
+    xhr.open(
+      "POST",
+      `/api/upload?roomId=${encodeURIComponent(roomId)}&sender=${encodeURIComponent(
+        username
+      )}`
+    )
+
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return
+      const pct = Math.round((e.loaded / e.total) * 100)
+      setUploadPct(pct)
+      toast.loading(`Uploading ${file.name} — ${pct}%`, { id: toastId })
+    }
+
+    xhr.onload = () => {
+      finish()
+      if (xhr.status >= 200 && xhr.status < 300) {
+        toast.success(`Sent ${file.name}`, { id: toastId })
+        refetch()
+      } else {
+        let msg = "Upload failed."
+        try {
+          const body = JSON.parse(xhr.responseText)
+          if (body.error === "file-too-large")
+            msg = `File too large (max ${formatBytes(body.maxBytes)}).`
+          else if (body.error === "unsupported-type")
+            msg = "Only images and PDF files are allowed."
+        } catch {}
+        setUploadError(msg)
+        toast.error(msg, { id: toastId })
+      }
+    }
+
+    xhr.onerror = () => {
+      finish()
+      const msg = "Upload failed. Check your connection."
+      setUploadError(msg)
+      toast.error(msg, { id: toastId })
+    }
+
+    xhr.send(form)
   }
 
   useRealtime({
@@ -298,6 +332,25 @@ const RoomPage = () => {
       {uploadError && (
         <div className="px-4 py-2 text-xs text-red-500 bg-red-950/40 border-t border-red-900">
           {uploadError}
+        </div>
+      )}
+
+      {uploading && (
+        <div className="px-4 pt-2 bg-zinc-900/30">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] text-zinc-400 uppercase tracking-wide">
+              Uploading…
+            </span>
+            <span className="text-[10px] text-green-400 font-bold tabular-nums">
+              {uploadPct}%
+            </span>
+          </div>
+          <div className="h-1.5 bg-zinc-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-green-500 transition-[width] duration-150 ease-out"
+              style={{ width: `${uploadPct}%` }}
+            />
+          </div>
         </div>
       )}
 

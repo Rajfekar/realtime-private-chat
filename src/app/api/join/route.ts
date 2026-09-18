@@ -58,11 +58,15 @@ export async function POST(req: NextRequest) {
   })
   await touchRoom(roomId)
 
+  // Mark the cookie secure only when the request actually came over HTTPS, so
+  // it works both on the https domain and over plain http via the server IP.
+  const isHttps = (req.headers.get("x-forwarded-proto") || "http") === "https"
+
   const res = NextResponse.json({ ok: true, owner: isOwner, code })
   res.cookies.set("x-auth-token", token, {
     path: "/",
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isHttps,
     sameSite: "strict",
   })
   return res
