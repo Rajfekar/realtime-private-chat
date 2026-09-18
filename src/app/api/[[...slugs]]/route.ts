@@ -13,7 +13,14 @@ export const dynamic = "force-dynamic"
 const rooms = new Elysia({ prefix: "/room" })
   .post(
     "/create",
-    async ({ body }) => {
+    async ({ body, set }) => {
+      // Only your group can create rooms. Fail closed if no password is configured.
+      const expected = process.env.CREATE_PASSWORD || ""
+      if (!expected || body?.password !== expected) {
+        set.status = 401
+        return { error: "invalid-password" }
+      }
+
       const roomId = nanoid()
       const ttl = clampTtl(body?.ttl)
 
@@ -25,7 +32,12 @@ const rooms = new Elysia({ prefix: "/room" })
 
       return { roomId, ttl }
     },
-    { body: z.object({ ttl: z.number().int().optional() }) }
+    {
+      body: z.object({
+        ttl: z.number().int().optional(),
+        password: z.string().max(200).optional(),
+      }),
+    }
   )
   .use(authMiddleware)
   .get(

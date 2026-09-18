@@ -35,17 +35,26 @@ function Lobby() {
   // Selected destruction time. `custom` holds minutes when the user types their own.
   const [seconds, setSeconds] = useState(TTL_PRESETS[0].seconds)
   const [customMin, setCustomMin] = useState("")
+  const [password, setPassword] = useState("")
+  const [authError, setAuthError] = useState<string | null>(null)
 
   const { mutate: createRoom, isPending } = useMutation({
-    mutationFn: async (ttl: number) => {
+    mutationFn: async ({ ttl, password }: { ttl: number; password: string }) => {
+      setAuthError(null)
       const res = await fetch("/api/room/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ttl }),
+        body: JSON.stringify({ ttl, password }),
       })
+      if (res.status === 401) {
+        setAuthError("Incorrect password.")
+        return
+      }
       if (res.ok) {
         const data = (await res.json()) as { roomId: string }
         router.push(`/room/${data.roomId}`)
+      } else {
+        setAuthError("Could not create room. Try again.")
       }
     },
   })
@@ -145,9 +154,28 @@ function Lobby() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <label className="flex items-center text-zinc-500">
+                Creator Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && password) createRoom({ ttl: seconds, password })
+                }}
+                placeholder="Required to create a room"
+                className="w-full bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-sm text-zinc-300 font-mono placeholder:text-zinc-700"
+              />
+              {authError && (
+                <p className="text-red-500 text-xs font-bold">{authError}</p>
+              )}
+            </div>
+
             <button
-              onClick={() => createRoom(seconds)}
-              disabled={isPending}
+              onClick={() => createRoom({ ttl: seconds, password })}
+              disabled={isPending || !password}
               className="w-full bg-zinc-100 text-black p-3 text-sm font-bold hover:bg-zinc-50 hover:text-black transition-colors mt-2 cursor-pointer disabled:opacity-50"
             >
               CREATE SECURE ROOM
