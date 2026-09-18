@@ -4,7 +4,14 @@ import { nanoid } from "nanoid"
 import { AuthError, authMiddleware } from "./auth"
 import { z } from "zod"
 import { Message, publish } from "@/lib/realtime"
-import { ROOM_TTL_SECONDS, clampTtl, keys, purgeRoom, touchRoom } from "@/lib/rooms"
+import {
+  ROOM_TTL_SECONDS,
+  clampTtl,
+  keys,
+  purgeRoom,
+  reserveCode,
+  touchRoom,
+} from "@/lib/rooms"
 
 // ioredis (raw TCP) requires the Node.js runtime, not Edge.
 export const runtime = "nodejs"
@@ -24,13 +31,20 @@ const rooms = new Elysia({ prefix: "/room" })
       const roomId = nanoid()
       const ttl = clampTtl(body?.ttl)
 
+      const code = await reserveCode(roomId, ttl)
+      if (!code) {
+        set.status = 500
+        return { error: "code-generation-failed" }
+      }
+
       await redis.hset(keys.meta(roomId), {
         connected: JSON.stringify([]),
         createdAt: Date.now(),
+        code,
       })
       await redis.expire(keys.meta(roomId), ttl)
 
-      return { roomId, ttl }
+      return { roomId, code, ttl }
     },
     {
       body: z.object({
@@ -38,6 +52,24 @@ const rooms = new Elysia({ prefix: "/room" })
         password: z.string().max(200).optional(),
       }),
     }
+  )
+  // Resolve a 6-digit share code to its room (public — how joiners enter).
+  .get(
+    "/resolve",
+    async ({ query, set }) => {
+      const code = (query.code || "").trim()
+      if (!/^\d{6}$/.test(code)) {
+        set.status = 400
+        return { error: "bad-code" }
+      }
+      const roomId = await redis.get(keys.code(code))
+      if (!roomId) {
+        set.status = 404
+        return { error: "not-found" }
+      }
+      return { roomId }
+    },
+    { query: z.object({ code: z.string() }) }
   )
   .use(authMiddleware)
   .get(
@@ -50,7 +82,12 @@ const rooms = new Elysia({ prefix: "/room" })
   )
   .delete(
     "/",
-    async ({ auth }) => {
+    async ({ auth, set }) => {
+      // Only the room owner (first/creator slot) may destroy it.
+      if (auth.connected[0] !== auth.token) {
+        set.status = 403
+        return { error: "not-owner" }
+      }
       await publish(auth.roomId, { event: "destroy", data: { isDestroyed: true } })
       await purgeRoom(auth.roomId)
       return { ok: true }

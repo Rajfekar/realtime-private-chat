@@ -32,6 +32,8 @@ const RoomPage = () => {
   const { username } = useUsername()
   const [input, setInput] = useState("")
   const [joined, setJoined] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
+  const [code, setCode] = useState("")
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -66,11 +68,13 @@ const RoomPage = () => {
         { method: "POST" }
       )
       if (cancelled) return
+      const body = await res.json().catch(() => ({}))
       if (res.ok) {
         setJoined(true)
+        setIsOwner(!!body.owner)
+        setCode(body.code || "")
         return
       }
-      const body = await res.json().catch(() => ({}))
       router.push(`/?error=${body.error || "room-not-found"}`)
     }
     join()
@@ -187,8 +191,9 @@ const RoomPage = () => {
     onSuccess: () => detonate(),
   })
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href)
+  const copyCode = () => {
+    if (!code) return
+    navigator.clipboard.writeText(code)
     setCopyStatus("COPIED!")
     setTimeout(() => setCopyStatus("COPY"), 2000)
   }
@@ -200,16 +205,17 @@ const RoomPage = () => {
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <div className="flex flex-col min-w-0">
             <span className="text-[10px] sm:text-xs text-zinc-500 uppercase">
-              Room ID
+              Room Code
             </span>
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <span className="font-bold text-green-500 truncate text-sm sm:text-base max-w-[72px] sm:max-w-none">
-                {roomId.slice(0, 10) + "..."}
+              <span className="font-bold text-green-500 text-base sm:text-lg tracking-[0.2em] tabular-nums">
+                {code || "······"}
               </span>
               <button
-                onClick={copyLink}
-                title="Copy room link"
-                className="text-[10px] shrink-0 bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-200 transition-colors"
+                onClick={copyCode}
+                title="Copy room code"
+                disabled={!code}
+                className="text-[10px] shrink-0 bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
               >
                 {copyStatus}
               </button>
@@ -237,14 +243,16 @@ const RoomPage = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => destroyRoom()}
-          title="Destroy room now"
-          className="text-xs shrink-0 bg-zinc-800 hover:bg-red-600 px-2.5 sm:px-3 py-1.5 rounded text-zinc-400 hover:text-white font-bold transition-all group flex items-center gap-1.5 sm:gap-2 disabled:opacity-50"
-        >
-          <span className="group-hover:animate-pulse">💣</span>
-          <span className="hidden sm:inline">DESTROY NOW</span>
-        </button>
+        {isOwner && (
+          <button
+            onClick={() => destroyRoom()}
+            title="Destroy room now"
+            className="text-xs shrink-0 bg-zinc-800 hover:bg-red-600 px-2.5 sm:px-3 py-1.5 rounded text-zinc-400 hover:text-white font-bold transition-all group flex items-center gap-1.5 sm:gap-2 disabled:opacity-50"
+          >
+            <span className="group-hover:animate-pulse">💣</span>
+            <span className="hidden sm:inline">DESTROY NOW</span>
+          </button>
+        )}
       </header>
 
       {/* MESSAGES */}

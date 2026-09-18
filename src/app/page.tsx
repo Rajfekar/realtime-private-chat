@@ -65,6 +65,25 @@ function Lobby() {
     if (Number.isFinite(mins) && mins > 0) setSeconds(mins * 60)
   }
 
+  // Join an existing room by its 6-digit code (no URL needed).
+  const [joinCode, setJoinCode] = useState("")
+  const [joinError, setJoinError] = useState<string | null>(null)
+
+  const { mutate: joinByCode, isPending: joining } = useMutation({
+    mutationFn: async (code: string) => {
+      setJoinError(null)
+      const res = await fetch(`/api/room/resolve?code=${encodeURIComponent(code)}`)
+      if (res.ok) {
+        const data = (await res.json()) as { roomId: string }
+        router.push(`/room/${data.roomId}`)
+      } else if (res.status === 404) {
+        setJoinError("No room with that code (it may have expired).")
+      } else {
+        setJoinError("Enter a valid 6-digit code.")
+      }
+    },
+  })
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4">
       <div className="w-full max-w-md space-y-8">
@@ -180,6 +199,43 @@ function Lobby() {
             >
               CREATE SECURE ROOM
             </button>
+          </div>
+        </div>
+
+        {/* Join an existing room by code */}
+        <div className="border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur-md">
+          <div className="space-y-3">
+            <label className="flex items-center text-zinc-500">
+              Join a Room
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                value={joinCode}
+                onChange={(e) => {
+                  setJoinError(null)
+                  setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && joinCode.length === 6) joinByCode(joinCode)
+                }}
+                placeholder="6-digit code"
+                className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-lg tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
+              />
+              <button
+                onClick={() => joinByCode(joinCode)}
+                disabled={joining || joinCode.length !== 6}
+                className="bg-green-700 hover:bg-green-600 text-white px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                JOIN
+              </button>
+            </div>
+            {joinError && (
+              <p className="text-red-500 text-xs font-bold">{joinError}</p>
+            )}
           </div>
         </div>
       </div>

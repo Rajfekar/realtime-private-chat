@@ -29,6 +29,8 @@ export const keys = {
   files: (roomId: string) => `files:${roomId}`,
   fileBlob: (roomId: string, fileId: string) => `fileblob:${roomId}:${fileId}`,
   fileMeta: (roomId: string, fileId: string) => `filemeta:${roomId}:${fileId}`,
+  // 6-digit share code -> roomId
+  code: (code: string) => `code:${code}`,
 }
 
 /** Verify the caller's cookie token belongs to this room. Returns the token. */
@@ -57,11 +59,15 @@ export async function touchRoom(roomId: string, ttl?: number) {
     const current = await redis.ttl(keys.meta(roomId))
     target = current > 0 ? current : ROOM_TTL_SECONDS
   }
-  const fileIds = await redis.smembers(keys.files(roomId))
+  const [fileIds, code] = await Promise.all([
+    redis.smembers(keys.files(roomId)),
+    redis.hget(keys.meta(roomId), "code"),
+  ])
   const pipeline = redis.pipeline()
   pipeline.expire(keys.meta(roomId), target)
   pipeline.expire(keys.messages(roomId), target)
   pipeline.expire(keys.files(roomId), target)
+  if (code) pipeline.expire(keys.code(code), target)
   for (const id of fileIds) {
     pipeline.expire(keys.fileBlob(roomId, id), target)
     pipeline.expire(keys.fileMeta(roomId, id), target)
@@ -71,14 +77,28 @@ export async function touchRoom(roomId: string, ttl?: number) {
 
 /** Permanently delete everything in a room (the "self-destruct"). */
 export async function purgeRoom(roomId: string) {
-  const fileIds = await redis.smembers(keys.files(roomId))
+  const [fileIds, code] = await Promise.all([
+    redis.smembers(keys.files(roomId)),
+    redis.hget(keys.meta(roomId), "code"),
+  ])
   const pipeline = redis.pipeline()
   pipeline.del(keys.meta(roomId))
   pipeline.del(keys.messages(roomId))
   pipeline.del(keys.files(roomId))
+  if (code) pipeline.del(keys.code(code))
   for (const id of fileIds) {
     pipeline.del(keys.fileBlob(roomId, id))
     pipeline.del(keys.fileMeta(roomId, id))
   }
   await pipeline.exec()
+}
+
+/** Generate a unique 6-digit code and reserve it (SET NX) pointing at roomId. */
+export async function reserveCode(roomId: string, ttl: number): Promise<string | null> {
+  for (let i = 0; i < 10; i++) {
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    const ok = await redis.set(keys.code(code), roomId, "EX", ttl, "NX")
+    if (ok) return code
+  }
+  return null
 }

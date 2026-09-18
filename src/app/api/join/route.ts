@@ -30,12 +30,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "room-not-found" }, { status: 404 })
   }
 
-  const connected = parseConnected(await redis.hget(keys.meta(roomId), "connected"))
+  const meta = await redis.hgetall(keys.meta(roomId))
+  const connected = parseConnected(meta.connected)
+  const code = meta.code || ""
   const existingToken = req.cookies.get("x-auth-token")?.value
 
-  // Already allowed in.
+  // Already allowed in. The owner is whoever holds the first slot (the creator,
+  // who is the first to join right after creating the room).
   if (existingToken && connected.includes(existingToken)) {
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({
+      ok: true,
+      owner: connected[0] === existingToken,
+      code,
+    })
   }
 
   // Room at capacity (private 1:1 chat).
@@ -43,14 +50,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "room-full" }, { status: 403 })
   }
 
-  // Admit a new member.
+  // Admit a new member. First one in owns the room.
+  const isOwner = connected.length === 0
   const token = nanoid()
   await redis.hset(keys.meta(roomId), {
     connected: JSON.stringify([...connected, token]),
   })
   await touchRoom(roomId)
 
-  const res = NextResponse.json({ ok: true })
+  const res = NextResponse.json({ ok: true, owner: isOwner, code })
   res.cookies.set("x-auth-token", token, {
     path: "/",
     httpOnly: true,
