@@ -194,7 +194,7 @@ const RoomPage = () => {
   }
 
   return (
-    <main className="flex flex-col h-screen max-h-screen overflow-hidden">
+    <main className="flex flex-col h-dvh max-h-dvh overflow-hidden">
       {exploding && <Explosion onDone={goHome} />}
       <header className="border-b border-zinc-800 p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-4 bg-zinc-900/30">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
