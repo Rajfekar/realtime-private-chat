@@ -1,6 +1,10 @@
 import { App } from "@/app/api/[[...slugs]]/route"
 import { treaty } from "@elysiajs/eden"
 
-export const client = treaty<App>(
-  `${process.env.APP_URL || "realtime-private-chat-puce.vercel.app"}`
-).api
+// On the server, calls need an absolute URL; in the browser a relative one works.
+const baseUrl =
+  typeof window === "undefined"
+    ? process.env.APP_URL || "http://localhost:3000"
+    : window.location.origin
+
+export const client = treaty<App>(baseUrl).api

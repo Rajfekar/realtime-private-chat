@@ -1,10 +1,21 @@
 import { redis } from "@/lib/redis"
 import Elysia from "elysia"
 
-class AuthError extends Error {
+export class AuthError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "AuthError"
+  }
+}
+
+/** Parse the `connected` token list stored as a JSON string in the meta hash. */
+export function parseConnected(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
   }
 }
 
@@ -24,9 +35,9 @@ export const authMiddleware = new Elysia({ name: "auth" })
       throw new AuthError("Missing roomId or token.")
     }
 
-    const connected = await redis.hget<string[]>(`meta:${roomId}`, "connected")
+    const connected = parseConnected(await redis.hget(`meta:${roomId}`, "connected"))
 
-    if (!connected?.includes(token)) {
+    if (!connected.includes(token)) {
       throw new AuthError("Invalid token")
     }
 

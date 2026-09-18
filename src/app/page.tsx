@@ -1,10 +1,18 @@
 "use client"
 
 import { useUsername } from "@/hooks/use-username"
-import { client } from "@/lib/client"
 import { useMutation } from "@tanstack/react-query"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
+
+// Destruction-time presets (label -> seconds). Max is 2 hours.
+const TTL_PRESETS = [
+  { label: "10 min", seconds: 10 * 60 },
+  { label: "30 min", seconds: 30 * 60 },
+  { label: "1 hour", seconds: 60 * 60 },
+  { label: "2 hours", seconds: 120 * 60 },
+]
+const MAX_MINUTES = 120
 
 const Page = () => {
   return (
@@ -24,15 +32,29 @@ function Lobby() {
   const wasDestroyed = searchParams.get("destroyed") === "true"
   const error = searchParams.get("error")
 
-  const { mutate: createRoom } = useMutation({
-    mutationFn: async () => {
-      const res = await client.room.create.post()
+  // Selected destruction time. `custom` holds minutes when the user types their own.
+  const [seconds, setSeconds] = useState(TTL_PRESETS[0].seconds)
+  const [customMin, setCustomMin] = useState("")
 
-      if (res.status === 200) {
-        router.push(`/room/${res.data?.roomId}`)
+  const { mutate: createRoom, isPending } = useMutation({
+    mutationFn: async (ttl: number) => {
+      const res = await fetch("/api/room/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ttl }),
+      })
+      if (res.ok) {
+        const data = (await res.json()) as { roomId: string }
+        router.push(`/room/${data.roomId}`)
       }
     },
   })
+
+  const applyCustom = (value: string) => {
+    setCustomMin(value)
+    const mins = Math.min(Math.max(parseInt(value || "0", 10), 1), MAX_MINUTES)
+    if (Number.isFinite(mins) && mins > 0) setSeconds(mins * 60)
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4">
@@ -85,8 +107,47 @@ function Lobby() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <label className="flex items-center text-zinc-500">
+                Self-Destruct After
+              </label>
+
+              <div className="grid grid-cols-4 gap-2">
+                {TTL_PRESETS.map((p) => (
+                  <button
+                    key={p.seconds}
+                    onClick={() => {
+                      setSeconds(p.seconds)
+                      setCustomMin("")
+                    }}
+                    className={`p-2 text-xs font-bold border transition-colors ${
+                      seconds === p.seconds && customMin === ""
+                        ? "border-green-600 bg-green-950/40 text-green-400"
+                        : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={MAX_MINUTES}
+                  value={customMin}
+                  onChange={(e) => applyCustom(e.target.value)}
+                  placeholder="Custom minutes"
+                  className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-sm text-zinc-300 font-mono placeholder:text-zinc-700"
+                />
+                <span className="text-xs text-zinc-600">max {MAX_MINUTES}m</span>
+              </div>
+            </div>
+
             <button
-              onClick={() => createRoom()}
+              onClick={() => createRoom(seconds)}
+              disabled={isPending}
               className="w-full bg-zinc-100 text-black p-3 text-sm font-bold hover:bg-zinc-50 hover:text-black transition-colors mt-2 cursor-pointer disabled:opacity-50"
             >
               CREATE SECURE ROOM

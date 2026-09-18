@@ -1,30 +1,37 @@
 import { redis } from "@/lib/redis"
-import { Elysia, t } from "elysia"
+import { Elysia } from "elysia"
 import { nanoid } from "nanoid"
-import { authMiddleware } from "./auth"
+import { AuthError, authMiddleware } from "./auth"
 import { z } from "zod"
-import { Message, realtime } from "@/lib/realtime"
+import { Message, publish } from "@/lib/realtime"
+import { ROOM_TTL_SECONDS, clampTtl, keys, purgeRoom, touchRoom } from "@/lib/rooms"
 
-const ROOM_TTL_SECONDS = 60 * 10
+// ioredis (raw TCP) requires the Node.js runtime, not Edge.
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
 const rooms = new Elysia({ prefix: "/room" })
-  .post("/create", async () => {
-    const roomId = nanoid()
+  .post(
+    "/create",
+    async ({ body }) => {
+      const roomId = nanoid()
+      const ttl = clampTtl(body?.ttl)
 
-    await redis.hset(`meta:${roomId}`, {
-      connected: [],
-      createdAt: Date.now(),
-    })
+      await redis.hset(keys.meta(roomId), {
+        connected: JSON.stringify([]),
+        createdAt: Date.now(),
+      })
+      await redis.expire(keys.meta(roomId), ttl)
 
-    await redis.expire(`meta:${roomId}`, ROOM_TTL_SECONDS)
-
-    return { roomId }
-  })
+      return { roomId, ttl }
+    },
+    { body: z.object({ ttl: z.number().int().optional() }) }
+  )
   .use(authMiddleware)
   .get(
     "/ttl",
     async ({ auth }) => {
-      const ttl = await redis.ttl(`meta:${auth.roomId}`)
+      const ttl = await redis.ttl(keys.meta(auth.roomId))
       return { ttl: ttl > 0 ? ttl : 0 }
     },
     { query: z.object({ roomId: z.string() }) }
@@ -32,15 +39,9 @@ const rooms = new Elysia({ prefix: "/room" })
   .delete(
     "/",
     async ({ auth }) => {
-      await realtime
-        .channel(auth.roomId)
-        .emit("chat.destroy", { isDestroyed: true })
-
-      await Promise.all([
-        redis.del(auth.roomId),
-        redis.del(`meta:${auth.roomId}`),
-        redis.del(`messages:${auth.roomId}`),
-      ])
+      await publish(auth.roomId, { event: "destroy", data: { isDestroyed: true } })
+      await purgeRoom(auth.roomId)
+      return { ok: true }
     },
     { query: z.object({ roomId: z.string() }) }
   )
@@ -53,11 +54,8 @@ const messages = new Elysia({ prefix: "/messages" })
       const { sender, text } = body
       const { roomId } = auth
 
-      const roomExists = await redis.exists(`meta:${roomId}`)
-
-      if (!roomExists) {
-        throw new Error("Room does not exist")
-      }
+      const roomExists = await redis.exists(keys.meta(roomId))
+      if (!roomExists) throw new Error("Room does not exist")
 
       const message: Message = {
         id: nanoid(),
@@ -67,16 +65,18 @@ const messages = new Elysia({ prefix: "/messages" })
         roomId,
       }
 
-      // add message to history
-      await redis.rpush(`messages:${roomId}`, { ...message, token: auth.token })
-      await realtime.channel(roomId).emit("chat.message", message)
+      // Persist to history (with the owner token) then broadcast (without it).
+      await redis.rpush(
+        keys.messages(roomId),
+        JSON.stringify({ ...message, token: auth.token })
+      )
+      await publish(roomId, { event: "message", data: message })
 
-      // housekeeping
-      const remaining = await redis.ttl(`meta:${roomId}`)
+      // Re-arm the self-destruct timer.
+      const remaining = await redis.ttl(keys.meta(roomId))
+      await touchRoom(roomId, remaining > 0 ? remaining : ROOM_TTL_SECONDS)
 
-      await redis.expire(`messages:${roomId}`, remaining)
-      await redis.expire(`history:${roomId}`, remaining)
-      await redis.expire(roomId, remaining)
+      return { ok: true }
     },
     {
       query: z.object({ roomId: z.string() }),
@@ -89,23 +89,37 @@ const messages = new Elysia({ prefix: "/messages" })
   .get(
     "/",
     async ({ auth }) => {
-      const messages = await redis.lrange<Message>(
-        `messages:${auth.roomId}`,
-        0,
-        -1
-      )
-
-      return {
-        messages: messages.map((m) => ({
+      const raw = await redis.lrange(keys.messages(auth.roomId), 0, -1)
+      const messages = raw
+        .map((s) => {
+          try {
+            return JSON.parse(s) as Message
+          } catch {
+            return null
+          }
+        })
+        .filter((m): m is Message => m !== null)
+        .map((m) => ({
           ...m,
+          // Only reveal the token to its owner (used for "YOU" styling).
           token: m.token === auth.token ? auth.token : undefined,
-        })),
-      }
+        }))
+
+      return { messages }
     },
     { query: z.object({ roomId: z.string() }) }
   )
 
-const app = new Elysia({ prefix: "/api" }).use(rooms).use(messages)
+const app = new Elysia({ prefix: "/api" })
+  .error({ AuthError })
+  .onError(({ code, error, set }) => {
+    if (code === "AuthError" || (error instanceof Error && error.name === "AuthError")) {
+      set.status = 401
+      return { error: "Unauthorized" }
+    }
+  })
+  .use(rooms)
+  .use(messages)
 
 export const GET = app.fetch
 export const POST = app.fetch

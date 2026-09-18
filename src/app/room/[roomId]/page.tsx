@@ -15,6 +15,12 @@ function formatTimeRemaining(seconds: number) {
   return `${mins}:${secs.toString().padStart(2, "0")}`
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 const RoomPage = () => {
   const params = useParams()
   const roomId = params.roomId as string
@@ -23,13 +29,41 @@ const RoomPage = () => {
 
   const { username } = useUsername()
   const [input, setInput] = useState("")
+  const [joined, setJoined] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const [copyStatus, setCopyStatus] = useState("COPY")
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
 
+  // Join the room (assigns the auth-token cookie, enforces the 2-person cap).
+  useEffect(() => {
+    let cancelled = false
+    const join = async () => {
+      const res = await fetch(
+        `/api/join?roomId=${encodeURIComponent(roomId)}`,
+        { method: "POST" }
+      )
+      if (cancelled) return
+      if (res.ok) {
+        setJoined(true)
+        return
+      }
+      const body = await res.json().catch(() => ({}))
+      router.push(`/?error=${body.error || "room-not-found"}`)
+    }
+    join()
+    return () => {
+      cancelled = true
+    }
+  }, [roomId, router])
+
   const { data: ttlData } = useQuery({
     queryKey: ["ttl", roomId],
+    enabled: joined,
     queryFn: async () => {
       const res = await client.room.ttl.get({ query: { roomId } })
       return res.data
@@ -38,10 +72,7 @@ const RoomPage = () => {
 
   useEffect(() => {
     if (ttlData?.ttl === undefined) return
-    const timeoutId = setTimeout(() => {
-      setTimeRemaining(ttlData.ttl)
-    }, 0)
-    return () => clearTimeout(timeoutId)
+    setTimeRemaining(ttlData.ttl)
   }, [ttlData?.ttl])
 
   useEffect(() => {
@@ -67,11 +98,16 @@ const RoomPage = () => {
 
   const { data: messages, refetch } = useQuery({
     queryKey: ["messages", roomId],
+    enabled: joined,
     queryFn: async () => {
       const res = await client.messages.get({ query: { roomId } })
       return res.data?.messages || []
     },
   })
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
 
   const { mutate: sendMessage, isPending } = useMutation({
     mutationFn: async ({ text }: { text: string }) => {
@@ -79,22 +115,44 @@ const RoomPage = () => {
         { sender: username, text },
         { query: { roomId } }
       )
-
       setInput("")
     },
   })
 
-  useRealtime({
-    channels: [roomId],
-    events: ["chat.message", "chat.destroy"],
-    onData: ({ event }) => {
-      if (event === "chat.message") {
-        refetch()
+  const uploadFile = async (file: File) => {
+    setUploadError(null)
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      const res = await fetch(
+        `/api/upload?roomId=${encodeURIComponent(roomId)}&sender=${encodeURIComponent(
+          username
+        )}`,
+        { method: "POST", body: form }
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        if (body.error === "file-too-large")
+          setUploadError(`File too large (max ${formatBytes(body.maxBytes)}).`)
+        else if (body.error === "unsupported-type")
+          setUploadError("Only images and PDF files are allowed.")
+        else setUploadError("Upload failed.")
+        return
       }
+      refetch()
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ""
+    }
+  }
 
-      if (event === "chat.destroy") {
-        router.push("/?destroyed=true")
-      }
+  useRealtime({
+    roomId,
+    enabled: joined,
+    onEvent: (event) => {
+      if (event.event === "message") refetch()
+      if (event.event === "destroy") router.push("/?destroyed=true")
     },
   })
 
@@ -105,8 +163,7 @@ const RoomPage = () => {
   })
 
   const copyLink = () => {
-    const url = window.location.href
-    navigator.clipboard.writeText(url)
+    navigator.clipboard.writeText(window.location.href)
     setCopyStatus("COPIED!")
     setTimeout(() => setCopyStatus("COPY"), 2000)
   }
@@ -186,22 +243,54 @@ const RoomPage = () => {
                 </span>
               </div>
 
-              <p className="text-sm text-zinc-300 leading-relaxed break-all">
-                {msg.text}
-              </p>
+              {msg.file ? (
+                <FileBubble roomId={roomId} file={msg.file} />
+              ) : (
+                <p className="text-sm text-zinc-300 leading-relaxed break-all">
+                  {msg.text}
+                </p>
+              )}
             </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
+      {uploadError && (
+        <div className="px-4 py-2 text-xs text-red-500 bg-red-950/40 border-t border-red-900">
+          {uploadError}
+        </div>
+      )}
+
       <div className="p-4 border-t border-zinc-800 bg-zinc-900/30">
-        <div className="flex gap-4">
+        <div className="flex gap-3 items-stretch">
+          {/* Attach file */}
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) uploadFile(f)
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={!joined || uploading}
+            title="Attach image or PDF (max 10 MB)"
+            className="bg-zinc-800 text-zinc-400 px-4 text-sm font-bold hover:text-zinc-200 transition-all disabled:opacity-50 cursor-pointer"
+          >
+            {uploading ? "..." : "📎"}
+          </button>
+
           <div className="flex-1 relative group">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-green-500 animate-pulse">
               {">"}
             </span>
             <input
               autoFocus
+              ref={inputRef}
               type="text"
               value={input}
               onKeyDown={(e) => {
@@ -218,10 +307,10 @@ const RoomPage = () => {
 
           <button
             onClick={() => {
-              sendMessage({ text: input })
+              if (input.trim()) sendMessage({ text: input })
               inputRef.current?.focus()
             }}
-            disabled={!input.trim() || isPending}
+            disabled={!input.trim() || isPending || !joined}
             className="bg-zinc-800 text-zinc-400 px-6 text-sm font-bold hover:text-zinc-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             SEND
@@ -229,6 +318,48 @@ const RoomPage = () => {
         </div>
       </div>
     </main>
+  )
+}
+
+function FileBubble({
+  roomId,
+  file,
+}: {
+  roomId: string
+  file: NonNullable<Message["file"]>
+}) {
+  const src = `/api/file?roomId=${encodeURIComponent(roomId)}&fileId=${file.fileId}`
+  const isImage = file.type.startsWith("image/")
+
+  return (
+    <div className="border border-zinc-800 bg-zinc-950 p-2 rounded max-w-xs">
+      {isImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <a href={src} target="_blank" rel="noreferrer">
+          <img
+            src={src}
+            alt={file.name}
+            className="max-h-48 rounded object-contain"
+          />
+        </a>
+      ) : (
+        <div className="flex items-center gap-2 text-zinc-300 text-sm">
+          <span>📄</span>
+          <span className="truncate">{file.name}</span>
+        </div>
+      )}
+      <div className="flex items-center justify-between mt-2 gap-3">
+        <span className="text-[10px] text-zinc-600 truncate">
+          {formatBytes(file.size)}
+        </span>
+        <a
+          href={`${src}&download=1`}
+          className="text-[10px] bg-zinc-800 hover:bg-zinc-700 px-2 py-0.5 rounded text-zinc-400 hover:text-zinc-200"
+        >
+          DOWNLOAD
+        </a>
+      </div>
+    </div>
   )
 }
 
