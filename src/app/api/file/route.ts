@@ -36,7 +36,11 @@ export async function GET(req: NextRequest) {
   const meta = await redis.hgetall(keys.fileMeta(room, fileId))
   const name = meta?.name || "file"
   const type = meta?.type || "application/octet-stream"
-  const disposition = forceDownload ? "attachment" : "inline"
+
+  // Only images and PDFs may be shown inline; any other type is forced to
+  // download so a stored HTML/SVG file can't execute scripts in our origin.
+  const inlineOk = type.startsWith("image/") || type === "application/pdf"
+  const disposition = !forceDownload && inlineOk ? "inline" : "attachment"
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
@@ -44,6 +48,7 @@ export async function GET(req: NextRequest) {
       "Content-Length": String(buffer.length),
       "Content-Disposition": `${disposition}; filename="${encodeURIComponent(name)}"`,
       "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
     },
   })
 }

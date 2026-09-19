@@ -214,8 +214,6 @@ const RoomPage = () => {
           const body = JSON.parse(xhr.responseText)
           if (body.error === "file-too-large")
             msg = `File too large (max ${formatBytes(body.maxBytes)}).`
-          else if (body.error === "unsupported-type")
-            msg = "Only images and PDF files are allowed."
         } catch {}
         setUploadError(msg)
         toast.error(msg, { id: toastId })
@@ -440,7 +438,6 @@ const RoomPage = () => {
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp,application/pdf"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0]
@@ -450,7 +447,7 @@ const RoomPage = () => {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={!joined || uploading}
-            title="Attach image or PDF (max 10 MB)"
+            title="Attach any file (max 20 MB)"
             className="bg-zinc-800 text-zinc-400 px-4 text-sm font-bold hover:text-zinc-200 transition-all disabled:opacity-50 cursor-pointer"
           >
             {uploading ? "..." : "📎"}

@@ -3,7 +3,6 @@ import { nanoid } from "nanoid"
 import { redis } from "@/lib/redis"
 import { Message, publish } from "@/lib/realtime"
 import {
-  ALLOWED_FILE_TYPES,
   MAX_FILE_BYTES,
   isDefaultRoom,
   keys,
@@ -54,13 +53,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-    return NextResponse.json(
-      { error: "unsupported-type", allowed: ALLOWED_FILE_TYPES },
-      { status: 415 }
-    )
-  }
-
+  // Any file type is allowed.
   const fileId = nanoid()
   const buffer = Buffer.from(await file.arrayBuffer())
   const ttl = await roomChatTtl(room)
