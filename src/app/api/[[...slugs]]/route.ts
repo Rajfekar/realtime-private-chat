@@ -105,7 +105,7 @@ const rooms = new Elysia({ prefix: "/room" })
         await redis.hset(keys.meta(auth.roomId), {
           clearAt: Date.now() + DEFAULT_CLEAR_SECONDS * 1000,
         })
-        await publish(auth.roomId, { event: "update" })
+        await publish(auth.roomId, { event: "cleared" })
         return { ok: true, cleared: true }
       }
       // Normal rooms: only the owner (first/creator slot) may destroy them.

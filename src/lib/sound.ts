@@ -82,6 +82,48 @@ export function playReceive() {
   }
 }
 
+/** Broom "swoosh" for the always-on room clear: noise through a sweeping bandpass. */
+export function playSweep() {
+  const ac = getCtx()
+  if (!ac) return
+  const now = ac.currentTime
+  const dur = 0.6
+
+  const buffer = ac.createBuffer(1, ac.sampleRate * dur, ac.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  const noise = ac.createBufferSource()
+  noise.buffer = buffer
+
+  const bp = ac.createBiquadFilter()
+  bp.type = "bandpass"
+  bp.Q.value = 0.8
+  bp.frequency.setValueAtTime(500, now)
+  bp.frequency.exponentialRampToValueAtTime(4000, now + dur)
+
+  const gain = ac.createGain()
+  gain.gain.setValueAtTime(0.0001, now)
+  gain.gain.exponentialRampToValueAtTime(0.18, now + 0.1)
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur)
+
+  noise.connect(bp).connect(gain).connect(ac.destination)
+  noise.start(now)
+  noise.stop(now + dur)
+
+  // A light shimmer tail.
+  const osc = ac.createOscillator()
+  const og = ac.createGain()
+  osc.type = "triangle"
+  osc.frequency.setValueAtTime(1200, now + 0.15)
+  osc.frequency.exponentialRampToValueAtTime(2400, now + dur)
+  og.gain.setValueAtTime(0.0001, now + 0.15)
+  og.gain.exponentialRampToValueAtTime(0.05, now + 0.25)
+  og.gain.exponentialRampToValueAtTime(0.0001, now + dur)
+  osc.connect(og).connect(ac.destination)
+  osc.start(now + 0.15)
+  osc.stop(now + dur)
+}
+
 /** Explosion boom: noise burst + a descending low sine thud. */
 export function playBoom() {
   const ac = getCtx()

@@ -1,4 +1,5 @@
 import { redis } from "@/lib/redis"
+import { publish } from "@/lib/realtime"
 import { parseConnected } from "@/app/api/[[...slugs]]/auth"
 
 export const ROOM_TTL_SECONDS = Number(process.env.ROOM_TTL_SECONDS || 600)
@@ -173,6 +174,8 @@ export async function rollDefaultIfDue(): Promise<{ clearAt: number; cleared: bo
     await purgeChat(DEFAULT_ROOM_ID)
     clearAt = now + DEFAULT_CLEAR_SECONDS * 1000
     await redis.hset(keys.meta(DEFAULT_ROOM_ID), { clearAt })
+    // Notify everyone in the room so they play the sweep animation together.
+    await publish(DEFAULT_ROOM_ID, { event: "cleared" })
     cleared = true
   }
   return { clearAt, cleared }

@@ -9,7 +9,8 @@ import { format } from "date-fns"
 import { useParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Explosion from "@/components/explosion"
-import { playBoom, playReceive, playSend, playTick } from "@/lib/sound"
+import SweepClean from "@/components/sweep-clean"
+import { playBoom, playReceive, playSend, playSweep, playTick } from "@/lib/sound"
 import { toast } from "sonner"
 
 function formatTimeRemaining(seconds: number) {
@@ -61,6 +62,16 @@ const RoomPage = () => {
   const goHome = useCallback(() => {
     router.push("/?destroyed=true")
   }, [router])
+
+  // Always-on room clear: sweep animation + swoosh, then refresh (room stays).
+  const [sweeping, setSweeping] = useState(false)
+  const sweepingRef = useRef(false)
+  const clearDefault = useCallback(() => {
+    if (sweepingRef.current) return
+    sweepingRef.current = true
+    playSweep()
+    setSweeping(true)
+  }, [])
 
   // Join the room (assigns the auth-token cookie, enforces the 2-person cap).
   useEffect(() => {
@@ -122,10 +133,10 @@ const RoomPage = () => {
 
     if (timeRemaining === 0) {
       if (isDefault) {
-        // Always-on room: wipe the view and pull the fresh window, don't destroy.
+        // Always-on room: sweep the chat, pull the fresh window, don't destroy.
         refetchTtl()
         refetch()
-        toast("Chat cleared", { icon: "🧹", duration: 2000 })
+        clearDefault()
       } else {
         detonate()
       }
@@ -143,7 +154,7 @@ const RoomPage = () => {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [timeRemaining, detonate, exploding, isDefault, refetch, refetchTtl])
+  }, [timeRemaining, detonate, exploding, isDefault, refetch, refetchTtl, clearDefault])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -231,8 +242,11 @@ const RoomPage = () => {
         if (event.data.sender !== username) playReceive()
       } else if (event.event === "update") {
         refetch()
-        // A manual clear of the always-on room also resets its countdown.
-        if (isDefault) refetchTtl()
+      } else if (event.event === "cleared") {
+        // Always-on room was cleared (auto or manual): sweep + refresh.
+        refetch()
+        refetchTtl()
+        clearDefault()
       } else if (event.event === "destroy") {
         detonate()
       }
@@ -259,7 +273,7 @@ const RoomPage = () => {
       if (isDefault) {
         refetch()
         refetchTtl()
-        toast("Chat cleared", { icon: "🧹", duration: 2000 })
+        clearDefault()
       } else {
         detonate()
       }
@@ -276,6 +290,14 @@ const RoomPage = () => {
   return (
     <main className="flex flex-col h-dvh max-h-dvh overflow-hidden">
       {exploding && <Explosion onDone={goHome} />}
+      {sweeping && (
+        <SweepClean
+          onDone={() => {
+            setSweeping(false)
+            sweepingRef.current = false
+          }}
+        />
+      )}
       <header className="border-b border-zinc-800 p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-4 bg-zinc-900/30">
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <div className="flex flex-col min-w-0">
