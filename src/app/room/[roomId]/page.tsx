@@ -9,7 +9,7 @@ import { format } from "date-fns"
 import { useParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 import Explosion from "@/components/explosion"
-import { playBoom, playTick } from "@/lib/sound"
+import { playBoom, playReceive, playSend, playTick } from "@/lib/sound"
 import { toast } from "sonner"
 
 function formatTimeRemaining(seconds: number) {
@@ -157,6 +157,7 @@ const RoomPage = () => {
       )
       setInput("")
     },
+    onSuccess: () => playSend(),
   })
 
   const uploadFile = (file: File) => {
@@ -194,6 +195,7 @@ const RoomPage = () => {
       finish()
       if (xhr.status >= 200 && xhr.status < 300) {
         toast.success(`Sent ${file.name}`, { id: toastId })
+        playSend()
         refetch()
       } else {
         let msg = "Upload failed."
@@ -223,12 +225,17 @@ const RoomPage = () => {
     roomId,
     enabled: joined,
     onEvent: (event) => {
-      if (event.event === "message" || event.event === "update") {
+      if (event.event === "message") {
+        refetch()
+        // Chime only for messages from the other person (not our own echo).
+        if (event.data.sender !== username) playReceive()
+      } else if (event.event === "update") {
         refetch()
         // A manual clear of the always-on room also resets its countdown.
-        if (isDefault && event.event === "update") refetchTtl()
+        if (isDefault) refetchTtl()
+      } else if (event.event === "destroy") {
+        detonate()
       }
-      if (event.event === "destroy") detonate()
     },
   })
 

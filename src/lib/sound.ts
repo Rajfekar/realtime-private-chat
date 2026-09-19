@@ -41,6 +41,47 @@ export function playTick(urgent = false) {
   osc.stop(now + 0.07)
 }
 
+/** Soft rising blip when you send a message or finish an upload. */
+export function playSend() {
+  const ac = getCtx()
+  if (!ac) return
+  const now = ac.currentTime
+  const osc = ac.createOscillator()
+  const gain = ac.createGain()
+  osc.type = "sine"
+  osc.frequency.setValueAtTime(520, now)
+  osc.frequency.exponentialRampToValueAtTime(880, now + 0.1)
+  gain.gain.setValueAtTime(0.0001, now)
+  gain.gain.exponentialRampToValueAtTime(0.11, now + 0.02)
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16)
+  osc.connect(gain).connect(ac.destination)
+  osc.start(now)
+  osc.stop(now + 0.18)
+}
+
+/** Gentle two-note ding when a message arrives from someone else. */
+export function playReceive() {
+  const ac = getCtx()
+  if (!ac) return
+  const now = ac.currentTime
+  const notes: [number, number][] = [
+    [880, 0],
+    [1174, 0.09],
+  ]
+  for (const [freq, t] of notes) {
+    const osc = ac.createOscillator()
+    const gain = ac.createGain()
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(freq, now + t)
+    gain.gain.setValueAtTime(0.0001, now + t)
+    gain.gain.exponentialRampToValueAtTime(0.1, now + t + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.14)
+    osc.connect(gain).connect(ac.destination)
+    osc.start(now + t)
+    osc.stop(now + t + 0.16)
+  }
+}
+
 /** Explosion boom: noise burst + a descending low sine thud. */
 export function playBoom() {
   const ac = getCtx()
