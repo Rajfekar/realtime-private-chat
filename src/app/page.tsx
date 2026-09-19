@@ -130,6 +130,43 @@ function Lobby() {
           </p>
         </div>
 
+        {/* Join an existing room by code — at the top for quick access */}
+        <div className="border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur-md">
+          <div className="space-y-3">
+            <label className="flex items-center text-zinc-500">
+              Join a Room
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                value={joinCode}
+                onChange={(e) => {
+                  setJoinError(null)
+                  setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 4))
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && joinCode.length === 4) joinByCode(joinCode)
+                }}
+                placeholder="4-digit code"
+                className="min-w-0 flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-base sm:text-lg tracking-[0.25em] sm:tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
+              />
+              <button
+                onClick={() => joinByCode(joinCode)}
+                disabled={joining || joinCode.length !== 4}
+                className="shrink-0 bg-green-700 hover:bg-green-600 text-white px-4 sm:px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                JOIN
+              </button>
+            </div>
+            {joinError && (
+              <p className="text-red-500 text-xs font-bold">{joinError}</p>
+            )}
+          </div>
+        </div>
+
         <div className="border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur-md">
           <div className="space-y-5">
             <div className="space-y-2">
@@ -233,43 +270,6 @@ function Lobby() {
             >
               CREATE SECURE ROOM
             </button>
-          </div>
-        </div>
-
-        {/* Join an existing room by code */}
-        <div className="border border-zinc-800 bg-zinc-900/50 p-6 backdrop-blur-md">
-          <div className="space-y-3">
-            <label className="flex items-center text-zinc-500">
-              Join a Room
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={4}
-                value={joinCode}
-                onChange={(e) => {
-                  setJoinError(null)
-                  setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 4))
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && joinCode.length === 4) joinByCode(joinCode)
-                }}
-                placeholder="4-digit code"
-                className="min-w-0 flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-base sm:text-lg tracking-[0.25em] sm:tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
-              />
-              <button
-                onClick={() => joinByCode(joinCode)}
-                disabled={joining || joinCode.length !== 4}
-                className="shrink-0 bg-green-700 hover:bg-green-600 text-white px-4 sm:px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
-              >
-                JOIN
-              </button>
-            </div>
-            {joinError && (
-              <p className="text-red-500 text-xs font-bold">{joinError}</p>
-            )}
           </div>
         </div>
       </div>
