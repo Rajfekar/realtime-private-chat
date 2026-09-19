@@ -34,6 +34,7 @@ const RoomPage = () => {
   const [input, setInput] = useState("")
   const [joined, setJoined] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  const [isDefault, setIsDefault] = useState(false)
   const [code, setCode] = useState("")
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -74,6 +75,7 @@ const RoomPage = () => {
       if (res.ok) {
         setJoined(true)
         setIsOwner(!!body.owner)
+        setIsDefault(!!body.isDefault)
         setCode(body.code || "")
         return
       }
@@ -85,7 +87,7 @@ const RoomPage = () => {
     }
   }, [roomId, router])
 
-  const { data: ttlData } = useQuery({
+  const { data: ttlData, refetch: refetchTtl } = useQuery({
     queryKey: ["ttl", roomId],
     enabled: joined,
     queryFn: async () => {
@@ -99,17 +101,34 @@ const RoomPage = () => {
     setTimeRemaining(ttlData.ttl)
   }, [ttlData?.ttl])
 
+  const { data: messages, refetch } = useQuery({
+    queryKey: ["messages", roomId],
+    enabled: joined,
+    queryFn: async () => {
+      const res = await client.messages.get({ query: { roomId } })
+      return res.data?.messages || []
+    },
+  })
+
   // Ticking clock for the final 10 seconds (higher pitch in the last 3).
+  // Skipped for the always-on room (it just clears, it doesn't detonate).
   useEffect(() => {
-    if (timeRemaining === null || exploding) return
+    if (timeRemaining === null || exploding || isDefault) return
     if (timeRemaining > 0 && timeRemaining <= 10) playTick(timeRemaining <= 3)
-  }, [timeRemaining, exploding])
+  }, [timeRemaining, exploding, isDefault])
 
   useEffect(() => {
     if (timeRemaining === null || timeRemaining < 0 || exploding) return
 
     if (timeRemaining === 0) {
-      detonate()
+      if (isDefault) {
+        // Always-on room: wipe the view and pull the fresh window, don't destroy.
+        refetchTtl()
+        refetch()
+        toast("Chat cleared", { icon: "🧹", duration: 2000 })
+      } else {
+        detonate()
+      }
       return
     }
 
@@ -124,16 +143,7 @@ const RoomPage = () => {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [timeRemaining, detonate, exploding])
-
-  const { data: messages, refetch } = useQuery({
-    queryKey: ["messages", roomId],
-    enabled: joined,
-    queryFn: async () => {
-      const res = await client.messages.get({ query: { roomId } })
-      return res.data?.messages || []
-    },
-  })
+  }, [timeRemaining, detonate, exploding, isDefault, refetch, refetchTtl])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -213,7 +223,11 @@ const RoomPage = () => {
     roomId,
     enabled: joined,
     onEvent: (event) => {
-      if (event.event === "message" || event.event === "update") refetch()
+      if (event.event === "message" || event.event === "update") {
+        refetch()
+        // A manual clear of the always-on room also resets its countdown.
+        if (isDefault && event.event === "update") refetchTtl()
+      }
       if (event.event === "destroy") detonate()
     },
   })
@@ -234,7 +248,15 @@ const RoomPage = () => {
     mutationFn: async () => {
       await client.room.delete(null, { query: { roomId } })
     },
-    onSuccess: () => detonate(),
+    onSuccess: () => {
+      if (isDefault) {
+        refetch()
+        refetchTtl()
+        toast("Chat cleared", { icon: "🧹", duration: 2000 })
+      } else {
+        detonate()
+      }
+    },
   })
 
   const copyCode = () => {
@@ -272,7 +294,9 @@ const RoomPage = () => {
 
           <div className="flex flex-col shrink-0">
             <span className="text-[10px] sm:text-xs text-zinc-500 uppercase">
-              <span className="hidden sm:inline">Self-Destruct</span>
+              <span className="hidden sm:inline">
+                {isDefault ? "Auto-clear" : "Self-Destruct"}
+              </span>
               <span className="sm:hidden">Timer</span>
             </span>
             <span
@@ -289,14 +313,16 @@ const RoomPage = () => {
           </div>
         </div>
 
-        {isOwner && (
+        {(isDefault || isOwner) && (
           <button
             onClick={() => destroyRoom()}
-            title="Destroy room now"
+            title={isDefault ? "Clear all chat now" : "Destroy room now"}
             className="text-xs shrink-0 bg-zinc-800 hover:bg-red-600 px-2.5 sm:px-3 py-1.5 rounded text-zinc-400 hover:text-white font-bold transition-all group flex items-center gap-1.5 sm:gap-2 disabled:opacity-50"
           >
-            <span className="group-hover:animate-pulse">💣</span>
-            <span className="hidden sm:inline">DESTROY NOW</span>
+            <span className="group-hover:animate-pulse">{isDefault ? "🧹" : "💣"}</span>
+            <span className="hidden sm:inline">
+              {isDefault ? "CLEAR CHAT" : "DESTROY NOW"}
+            </span>
           </button>
         )}
       </header>

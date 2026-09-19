@@ -36,15 +36,24 @@ function Lobby() {
   const [seconds, setSeconds] = useState(TTL_PRESETS[0].seconds)
   const [customMin, setCustomMin] = useState("")
   const [password, setPassword] = useState("")
+  const [capacity, setCapacity] = useState(2)
   const [authError, setAuthError] = useState<string | null>(null)
 
   const { mutate: createRoom, isPending } = useMutation({
-    mutationFn: async ({ ttl, password }: { ttl: number; password: string }) => {
+    mutationFn: async ({
+      ttl,
+      password,
+      capacity,
+    }: {
+      ttl: number
+      password: string
+      capacity: number
+    }) => {
       setAuthError(null)
       const res = await fetch("/api/room/create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ttl, password }),
+        body: JSON.stringify({ ttl, password, capacity }),
       })
       if (res.status === 401) {
         setAuthError("Incorrect password.")
@@ -175,6 +184,30 @@ function Lobby() {
 
             <div className="space-y-2">
               <label className="flex items-center text-zinc-500">
+                Room Capacity
+              </label>
+              <div className="grid grid-cols-5 gap-2">
+                {[1, 2, 3, 5, 10].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setCapacity(n)}
+                    className={`p-2 text-xs font-bold border transition-colors ${
+                      capacity === n
+                        ? "border-green-600 bg-green-950/40 text-green-400"
+                        : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-600">
+                How many people can join this room.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center text-zinc-500">
                 Creator Password
               </label>
               <input
@@ -182,7 +215,8 @@ function Lobby() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && password) createRoom({ ttl: seconds, password })
+                  if (e.key === "Enter" && password)
+                    createRoom({ ttl: seconds, password, capacity })
                 }}
                 placeholder="Required to create a room"
                 className="w-full bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-sm text-zinc-300 font-mono placeholder:text-zinc-700"
@@ -193,7 +227,7 @@ function Lobby() {
             </div>
 
             <button
-              onClick={() => createRoom({ ttl: seconds, password })}
+              onClick={() => createRoom({ ttl: seconds, password, capacity })}
               disabled={isPending || !password}
               className="w-full bg-zinc-100 text-black p-3 text-sm font-bold hover:bg-zinc-50 hover:text-black transition-colors mt-2 cursor-pointer disabled:opacity-50"
             >
@@ -213,21 +247,21 @@ function Lobby() {
                 type="text"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                maxLength={6}
+                maxLength={4}
                 value={joinCode}
                 onChange={(e) => {
                   setJoinError(null)
-                  setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  setJoinCode(e.target.value.replace(/\D/g, "").slice(0, 4))
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && joinCode.length === 6) joinByCode(joinCode)
+                  if (e.key === "Enter" && joinCode.length === 4) joinByCode(joinCode)
                 }}
-                placeholder="6-digit code"
+                placeholder="4-digit code"
                 className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-lg tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
               />
               <button
                 onClick={() => joinByCode(joinCode)}
-                disabled={joining || joinCode.length !== 6}
+                disabled={joining || joinCode.length !== 4}
                 className="bg-green-700 hover:bg-green-600 text-white px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
               >
                 JOIN
@@ -236,6 +270,13 @@ function Lobby() {
             {joinError && (
               <p className="text-red-500 text-xs font-bold">{joinError}</p>
             )}
+            <button
+              onClick={() => joinByCode("5555")}
+              disabled={joining}
+              className="w-full mt-1 border border-amber-800/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 p-2.5 text-xs font-bold transition-colors disabled:opacity-50"
+            >
+              ⚡ OPEN ALWAYS-ON ROOM (5555)
+            </button>
           </div>
         </div>
       </div>

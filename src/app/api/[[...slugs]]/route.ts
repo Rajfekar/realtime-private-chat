@@ -5,11 +5,17 @@ import { AuthError, authMiddleware } from "./auth"
 import { z } from "zod"
 import { Message, publish } from "@/lib/realtime"
 import {
-  ROOM_TTL_SECONDS,
+  DEFAULT_CLEAR_SECONDS,
+  DEFAULT_ROOM_CODE,
+  clampCapacity,
   clampTtl,
+  ensureDefaultRoom,
+  isDefaultRoom,
   keys,
+  purgeChat,
   purgeRoom,
   reserveCode,
+  rollDefaultIfDue,
   touchRoom,
 } from "@/lib/rooms"
 
@@ -30,6 +36,7 @@ const rooms = new Elysia({ prefix: "/room" })
 
       const roomId = nanoid()
       const ttl = clampTtl(body?.ttl)
+      const capacity = clampCapacity(body?.capacity)
 
       const code = await reserveCode(roomId, ttl)
       if (!code) {
@@ -41,27 +48,31 @@ const rooms = new Elysia({ prefix: "/room" })
         connected: JSON.stringify([]),
         createdAt: Date.now(),
         code,
+        capacity,
       })
       await redis.expire(keys.meta(roomId), ttl)
 
-      return { roomId, code, ttl }
+      return { roomId, code, ttl, capacity }
     },
     {
       body: z.object({
         ttl: z.number().int().optional(),
+        capacity: z.number().int().optional(),
         password: z.string().max(200).optional(),
       }),
     }
   )
-  // Resolve a 6-digit share code to its room (public — how joiners enter).
+  // Resolve a 4-digit share code to its room (public — how joiners enter).
   .get(
     "/resolve",
     async ({ query, set }) => {
       const code = (query.code || "").trim()
-      if (!/^\d{6}$/.test(code)) {
+      if (!/^\d{4}$/.test(code)) {
         set.status = 400
         return { error: "bad-code" }
       }
+      // The always-on room is created on demand.
+      if (code === DEFAULT_ROOM_CODE) await ensureDefaultRoom()
       const roomId = await redis.get(keys.code(code))
       if (!roomId) {
         set.status = 404
@@ -75,6 +86,11 @@ const rooms = new Elysia({ prefix: "/room" })
   .get(
     "/ttl",
     async ({ auth }) => {
+      if (isDefaultRoom(auth.roomId)) {
+        const { clearAt } = await rollDefaultIfDue()
+        const secs = Math.ceil((clearAt - Date.now()) / 1000)
+        return { ttl: secs > 0 ? secs : 0 }
+      }
       const ttl = await redis.ttl(keys.meta(auth.roomId))
       return { ttl: ttl > 0 ? ttl : 0 }
     },
@@ -83,7 +99,16 @@ const rooms = new Elysia({ prefix: "/room" })
   .delete(
     "/",
     async ({ auth, set }) => {
-      // Only the room owner (first/creator slot) may destroy it.
+      // The always-on room is never deleted — "destroy" just clears its chat.
+      if (isDefaultRoom(auth.roomId)) {
+        await purgeChat(auth.roomId)
+        await redis.hset(keys.meta(auth.roomId), {
+          clearAt: Date.now() + DEFAULT_CLEAR_SECONDS * 1000,
+        })
+        await publish(auth.roomId, { event: "update" })
+        return { ok: true, cleared: true }
+      }
+      // Normal rooms: only the owner (first/creator slot) may destroy them.
       if (auth.connected[0] !== auth.token) {
         set.status = 403
         return { error: "not-owner" }
@@ -103,6 +128,9 @@ const messages = new Elysia({ prefix: "/messages" })
       const { sender, text } = body
       const { roomId } = auth
 
+      // For the always-on room, clear first if its window elapsed.
+      if (isDefaultRoom(roomId)) await rollDefaultIfDue()
+
       const roomExists = await redis.exists(keys.meta(roomId))
       if (!roomExists) throw new Error("Room does not exist")
 
@@ -121,9 +149,8 @@ const messages = new Elysia({ prefix: "/messages" })
       )
       await publish(roomId, { event: "message", data: message })
 
-      // Re-arm the self-destruct timer.
-      const remaining = await redis.ttl(keys.meta(roomId))
-      await touchRoom(roomId, remaining > 0 ? remaining : ROOM_TTL_SECONDS)
+      // Keep chat keys aligned to the room deadline (or the default room's window).
+      await touchRoom(roomId)
 
       return { ok: true }
     },
@@ -187,6 +214,7 @@ const messages = new Elysia({ prefix: "/messages" })
   .get(
     "/",
     async ({ auth }) => {
+      if (isDefaultRoom(auth.roomId)) await rollDefaultIfDue()
       const raw = await redis.lrange(keys.messages(auth.roomId), 0, -1)
       const messages = raw
         .map((s) => {

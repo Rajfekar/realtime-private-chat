@@ -5,9 +5,11 @@ import { Message, publish } from "@/lib/realtime"
 import {
   ALLOWED_FILE_TYPES,
   MAX_FILE_BYTES,
-  ROOM_TTL_SECONDS,
+  isDefaultRoom,
   keys,
   requireMember,
+  rollDefaultIfDue,
+  roomChatTtl,
   touchRoom,
 } from "@/lib/rooms"
 
@@ -32,6 +34,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
   const room = roomId as string
+
+  if (isDefaultRoom(room)) await rollDefaultIfDue()
 
   if (!(await redis.exists(keys.meta(room)))) {
     return NextResponse.json({ error: "room-not-found" }, { status: 404 })
@@ -59,8 +63,7 @@ export async function POST(req: NextRequest) {
 
   const fileId = nanoid()
   const buffer = Buffer.from(await file.arrayBuffer())
-  const remaining = await redis.ttl(keys.meta(room))
-  const ttl = remaining > 0 ? remaining : ROOM_TTL_SECONDS
+  const ttl = await roomChatTtl(room)
 
   // Store raw bytes + metadata, and remember the id for TTL refresh / purge.
   await redis.set(keys.fileBlob(room, fileId), buffer, "EX", ttl)

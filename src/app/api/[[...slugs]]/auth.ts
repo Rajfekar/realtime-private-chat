@@ -1,6 +1,9 @@
 import { redis } from "@/lib/redis"
 import Elysia from "elysia"
 
+// Kept as a literal here (not imported from rooms.ts) to avoid a circular import.
+const DEFAULT_ROOM_ID = "default"
+
 export class AuthError extends Error {
   constructor(message: string) {
     super(message)
@@ -37,7 +40,9 @@ export const authMiddleware = new Elysia({ name: "auth" })
 
     const connected = parseConnected(await redis.hget(`meta:${roomId}`, "connected"))
 
-    if (!connected.includes(token)) {
+    // The always-on room is open: any joined token (cookie set by /api/join) is a
+    // member. Normal rooms require the token to be in their connected list.
+    if (roomId !== DEFAULT_ROOM_ID && !connected.includes(token)) {
       throw new AuthError("Invalid token")
     }
 
