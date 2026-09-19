@@ -16,7 +16,7 @@ export const MAX_CAPACITY = Number(process.env.MAX_CAPACITY || 10)
 export const DEFAULT_ROOM_ID = "default"
 export const DEFAULT_ROOM_CODE = process.env.DEFAULT_ROOM_CODE || "5555"
 export const DEFAULT_ROOM_CAPACITY = Number(process.env.DEFAULT_ROOM_CAPACITY || 20)
-export const DEFAULT_CLEAR_SECONDS = Number(process.env.DEFAULT_CLEAR_SECONDS || 600)
+export const DEFAULT_CLEAR_SECONDS = Number(process.env.DEFAULT_CLEAR_SECONDS || 1800)
 
 export function isDefaultRoom(roomId: string) {
   return roomId === DEFAULT_ROOM_ID
