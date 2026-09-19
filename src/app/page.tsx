@@ -242,7 +242,7 @@ function Lobby() {
             <label className="flex items-center text-zinc-500">
               Join a Room
             </label>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <input
                 type="text"
                 inputMode="numeric"
@@ -257,12 +257,12 @@ function Lobby() {
                   if (e.key === "Enter" && joinCode.length === 4) joinByCode(joinCode)
                 }}
                 placeholder="4-digit code"
-                className="flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-lg tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
+                className="min-w-0 flex-1 bg-zinc-950 border border-zinc-800 focus:border-zinc-700 focus:outline-none p-3 text-base sm:text-lg tracking-[0.25em] sm:tracking-[0.4em] text-center text-zinc-100 font-mono placeholder:text-zinc-700 placeholder:tracking-normal placeholder:text-sm"
               />
               <button
                 onClick={() => joinByCode(joinCode)}
                 disabled={joining || joinCode.length !== 4}
-                className="bg-green-700 hover:bg-green-600 text-white px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
+                className="shrink-0 bg-green-700 hover:bg-green-600 text-white px-4 sm:px-5 py-3 text-sm font-bold transition-colors disabled:opacity-50 cursor-pointer"
               >
                 JOIN
               </button>
@@ -270,13 +270,6 @@ function Lobby() {
             {joinError && (
               <p className="text-red-500 text-xs font-bold">{joinError}</p>
             )}
-            <button
-              onClick={() => joinByCode("5555")}
-              disabled={joining}
-              className="w-full mt-1 border border-amber-800/60 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 p-2.5 text-xs font-bold transition-colors disabled:opacity-50"
-            >
-              ⚡ OPEN ALWAYS-ON ROOM (5555)
-            </button>
           </div>
         </div>
       </div>
